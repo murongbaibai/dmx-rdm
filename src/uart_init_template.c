@@ -195,7 +195,6 @@ dmx_line_t *DMX_LIN1_UART_Init(void)
     HAL_DMA_ChannelMap(&hdma_usart2_rx, DMA_CHANNEL_MAP_USART2_RD);
 
     
-
     //开启BREAK中断
     USART2->CR2 |= USART_CR2_LBDIE;
     //开启LIN模式
@@ -238,8 +237,6 @@ void DMA1_Channel2_3_IRQHandler(void)
 //DMX串口中断
 void USART2_IRQHandler(void)
 {
-    //如果长时间没有中断就重启
-	HAL_IWDG_Refresh(&hiwdg);
     //实现断开信号检测接口
     if(huart2.Instance->CR2 & USART_CR2_LBDIE)
     {
@@ -276,79 +273,21 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 
 
 /******************************** 对用户开放的回调函数（在中断环境中回调、代码需要简短） ********************************/
-dmx_line_t *rdm_unpack_ok_line = NULL;
-
-static inline uint8_t check(uint8_t data)
-{
-    uint8_t sum = 0;
-    for(int i = 0; i < 7; i++)
-        if(data&(1<<i))
-            sum++;
-    //奇数个1，校验位是1。偶数个1，校验位是0
-    return sum%2 == (data>>7)&0x01;
-}
-static inline uint8_t compute(uint8_t data)
-{
-    uint8_t sum = 0;
-    for(int i = 0; i < 7; i++)
-        if(data&(1<<i))
-            sum++;
-    return data | ((sum%2)<<7);
-}
 //发送前回调函数，用于修改发送数组
 void DMX_Send_Before_Callback(dmx_line_t *dmx_line)
 {    
-    dmx_line->dmx_send_buf[0] = 0x00;
-    for(int i = 0; i < MOTOR_NUM; i++)
-        dmx_line->dmx_send_buf[i+1] = compute(motor_status[i]);
+
 }
 
 //RDM解包完成回调函数
 void RDM_UnpackComplete_Callback(dmx_line_t *dmx_line)
 {
-    rdm_unpack_ok_line = dmx_line;
+
 }
 //DMX解包完成回调函数
 void DMX_UnpackComplete_Callback(dmx_line_t *dmx_line)
 {
-    //按键按下后屏蔽一包，等待更新完成
-    if(key_update_flag)
-    {
-        key_update_flag = 0;
-        return;
-    }
-    //根据收到的数据包设置自身的状态
-    for(int i = 0; i < MOTOR_NUM; i++)
-    {
-        if(check(dmx_line->dmx_package_prase[i]) == 0)
-            return;
-        dmx_line->dmx_package_prase[i] &= 0x7F;
-        //按键值发生变化
-        if(motor_status[i] != dmx_line->dmx_package_prase[i])
-        {
-            //如果当前房间不是溢出房间，或者没有启用溢出功能
-            if(spill_motor-1 != i || !spill_flag)
-            {
-                //更新状态
-                motor_status[i] = dmx_line->dmx_package_prase[i];
-            }
-            //如果在熄屏中
-            if(standby_flag)
-            {
-                led_exit_standby_mode();
-                //取消按键屏蔽
-                key_mask = 0;
-            }
-            else
-            {
-                //重新熄屏计时
-                led_run_time = 0;
-                led_set_status(i, motor_status[i]);
-            }
-            //保存参数
-            motor_arg_save();
-        }
-    }
+    
 }
 #ifdef USE_REFRESH_TIM
 //断开信号时间到回调

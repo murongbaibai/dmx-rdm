@@ -49,7 +49,7 @@ __weak dmx_line_t *DMX_LIN8_UART_Init(void)
 {
     return NULL;
 }
-#ifdef USE_HAL_DEVICE
+#ifdef USE_HAL_DRIVER
 //重定义函数
 #define DMX_Line_Close(dmx_line)                   HAL_UART_Abort((dmx_line)->huart)
 #define DMX_Receive_DMA_Stop(dmx_line)             HAL_DMA_Abort((dmx_line)->huart->hdmarx)
@@ -146,7 +146,7 @@ void DMX_Init(void)
  */
 void DMX_Line_Mode_Set(dmx_line_t *dmx_line, uint8_t status)
 {
-#ifndef USE_HAL_DEVICE
+#ifndef USE_HAL_DRIVER
     //重新开启串口
     if(dmx_line->dmx_status == DMX_LINE_OFF)
         DMX_Line_Oped(dmx_line);
@@ -167,7 +167,7 @@ void DMX_Line_Mode_Set(dmx_line_t *dmx_line, uint8_t status)
         //开启一次传输，然后自动续传
         case DMX_LINE_DMX_OUTPUT:
         case DMX_LINE_BLACK_OUTPUT:
-#ifdef USE_HAL_DEVICE
+#ifdef USE_HAL_DRIVER
             //如果在发送中，就会在发送完成中断中续传，不用打断发送
             if(dmx_line->huart->gState != HAL_UART_STATE_BUSY_TX)
                 DMX_Send(dmx_line);                
@@ -395,19 +395,24 @@ void DMX_TaskHandle(uint32_t nms)
 //创建新的DMX512链路
 dmx_line_t * DMX_Line_Create(void)
 {
+    //分配空间
 #ifdef INC_FREERTOS_H
     dmx_line_t *dmx_line = (dmx_line_t *)pvPortMalloc(sizeof(dmx_line_t));
 #else
     dmx_line_t *dmx_line = (dmx_line_t *)malloc(sizeof(dmx_line_t));
 #endif
+
+    //设置软件定时器默认值
     dmx_line->idle_tim.over = IDLE_TIME_OVER;
     dmx_line->send_delay_tim.over = SEND_DELAY_TIME_OVER; 
 #if USE_REFRESH_TIM
     dmx_line->refresh_tim.over = DMX_SIGNAL_BREAK_TIME; 
 #endif
+
+    //设置发送接收数组默认值
     memset(dmx_line->dmx_send_buf, 0, 513);
     dmx_line->rx_buf.buf[0] = 0x00;
-     dmx_line->rx_buf.index = 0;
+    dmx_line->rx_buf.index = 0;
 #if USE_DMX_USER_PRO
     //定义包头
     dmx_line->dmx_send_buf[0] = USER_PRO_START_CODE;
@@ -541,7 +546,7 @@ static void DMX_RDM_Unpack(dmx_line_t *dmx_line)
     }
     switch(dmx_line->dmx_rdm_package[1])
     {
-        case 0x01:
+        case 0x00:
             DMX_Unpack(dmx_line);
             //设置解包完成回调
             DMX_UnpackComplete_Callback(dmx_line);

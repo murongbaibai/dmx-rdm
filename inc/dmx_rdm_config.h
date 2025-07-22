@@ -35,10 +35,10 @@
     #define RDM_MODE_MAX     2                      /* 设备最大的模式数 MIN=1 MAX=8 */
 #endif
 
-#define DMX_ZHAN             0  //DMX数据包帧间隔
-#define DMX_PACKET_DELAY     200  //DMX数据包包间隔
-#define IDLE_TIME_OVER       4  //空闲检测定时器检测时长
-#define SEND_DELAY_TIME_OVER DMX_PACKET_DELAY //发包延时定时器检测时长
+#define DMX_ZHAN             0   //DMX数据包帧间隔（发送）
+#define DMX_PACKET_DELAY     200 //DMX数据包包间隔（发送）
+#define SEND_DELAY_TIME_OVER DMX_PACKET_DELAY //发包延时定时器检测时长（发送）
+#define IDLE_TIME_OVER       4   //空闲检测定时器检测时长（接收）
 
 
 //扩展协议模块
