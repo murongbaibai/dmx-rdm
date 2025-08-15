@@ -1,851 +1,553 @@
-#include "dmx_rdm.h"
+#include "../inc/dr_internal.h"
 
-#if (DEVICE_TYPE_SWITCH == DEVICE_TYPE_OUTPUT) 
-uid_t *uid_list;
-uid_t *cur_uid;
+/************************ UID链表管理函数 ************************/
 
-__weak void RDM_Device_Offline_Callback(dmx_line_t *dmx_line, uid_t *p)
+/**
+ * @brief 添加新UID到链表(头插法)
+ * @param dr_line DMX+RDM链路指针
+ * @param uid 要添加的设备UID
+ * @return 添加成功返回1，失败返回0
+ */
+uint8_t rdm_uid_add(dr_line_t *dr_line, uint64_t uid)
 {
-}
-__weak void RDM_Device_Online_Callback(dmx_line_t *dmx_line, uid_t *p)
-{
-}
-
-/******************UID链表配置函数******************/
-//头插法加UID
-uint8_t RDM_Uid_Add(uint64_t uid)
-{
-    //如果是已经添加过的设备就退出
-    if(RDM_Uid_Search(uid) != NULL)
+    // 检查UID是否已存在
+    if(rdm_uid_search(dr_line, uid) != NULL)
         return 0;
-    uid_t* new_uid = (uid_t *)malloc(sizeof(uid_t));
+
+    // 动态分配内存
+    uid_t *new_uid = (uid_t *)DR_MALLOC(sizeof(uid_t));
+
     if(new_uid == NULL)
         return 0;
-    new_uid->uid = uid;
-    new_uid->next = uid_list->next;
-    uid_list->next = new_uid;
 
-    new_uid->prev = uid_list;
+    // 初始化新节点
+    new_uid->uid = uid;
+    new_uid->online_flag = 1;
+
+    // 头插法插入链表
+    new_uid->next = __DR_RDM_UID_LIST(dr_line)->next;
+    new_uid->prev = __DR_RDM_UID_LIST(dr_line);
     new_uid->next->prev = new_uid;
+    __DR_RDM_UID_LIST(dr_line)->next = new_uid;
+
     return 1;
 }
-//初始化UID链表
-void RDM_Uid_Init(void)
+
+/**
+ * @brief 搜索指定UID的节点
+ * @param dr_line DMX+RDM链路指针
+ * @param uid 要搜索的设备UID
+ * @return 找到返回节点指针，未找到返回NULL
+ */
+uid_t *rdm_uid_search(dr_line_t *dr_line, uint64_t uid)
 {
-    if(uid_list == NULL)
-        uid_list = (uid_t *)malloc(sizeof(uid_t));
-    //头节点存厂商ID
-    uid_list->uid = RDM_DEFAULT_UID;
-    uid_list->next = uid_list;
-    uid_list->prev = uid_list;
-}
-//搜寻UID返回操作指针
-uid_t *RDM_Uid_Search(uint64_t uid)
-{
-    uid_t *p = uid_list->next;
-    while(p != uid_list)
+    uid_t *p = __DR_RDM_UID_LIST(dr_line)->next;
+    while(p != __DR_RDM_UID_LIST(dr_line))
     {
         if(p->uid == uid)
             return p;
-        p=p->next;
+        p = p->next;
     }
     return NULL;
 }
-//销毁链表
-void RDM_Uid_Distory(void)
-{
-    uid_t *p = uid_list->next;
 
-    while(p != uid_list)
-    {
-        uid_list->next = p->next;
-        free(p);
-        p = uid_list->next;
-    }
-    uid_list->next = uid_list;
-    uid_list->prev = uid_list;
-}
-//根据UID删除设备
-void RDM_Uid_Delete(uint64_t uid)
+/**
+ * @brief 销毁整个UID链表
+ * @param dr_line DMX+RDM链路指针
+ */
+void rdm_uid_distory(dr_line_t *dr_line)
 {
-    uid_t *p = uid_list->next;
-    while(p != uid_list)
+    uid_t *p = __DR_RDM_UID_LIST(dr_line)->next;
+
+    // 遍历释放所有节点
+    while(p != __DR_RDM_UID_LIST(dr_line))
     {
-        if(p->uid == uid)
-        {
-            p->prev->next = p->next;
-            p->next->prev = p->prev;
-            free(p);
-            return;
-        }
-        p=p->next;
+        __DR_RDM_UID_LIST(dr_line)->next = p->next;
+        DR_FREE(p);
+        p = __DR_RDM_UID_LIST(dr_line)->next;
     }
+
+    // 重置链表头
+    __DR_RDM_UID_LIST(dr_line)->next = __DR_RDM_UID_LIST(dr_line);
+    __DR_RDM_UID_LIST(dr_line)->prev = __DR_RDM_UID_LIST(dr_line);
 }
-//直接删除设备
-void RDM_Device_Delete(uid_t *p)
+
+/**
+ * @brief 删除指定UID节点
+ * @param p 要删除的节点指针
+ */
+void rdm_uid_delete(uid_t *p)
 {
+    // 从链表中移除节点
     p->prev->next = p->next;
     p->next->prev = p->prev;
-    free(p);
+
+    // 释放节点内存
+    DR_FREE(p);
 }
-//获取设备总数
-uint8_t RDM_Uid_Get_Count(void)
+
+/**
+ * @brief 获取当前设备总数
+ * @param dr_line DMX+RDM链路指针
+ * @return 设备数量
+ */
+uint8_t rdm_uid_get_sum(dr_line_t *dr_line)
 {
     uint8_t device_max = 0;
+    uid_t *p = __DR_RDM_UID_LIST(dr_line)->next;
 
-    uid_t *p = uid_list->next;
-    while(p != uid_list)
+    // 遍历统计节点数
+    while(p != __DR_RDM_UID_LIST(dr_line))
     {
-        device_max++;         
+        device_max++;
         p = p->next;
     }
     return device_max;
 }
 
-/******************发送RDM包******************/
-//RDM包初始化
-rdm_package_t rdm_package = {
-    .start = 0xCC,
-    .sub_start = 0x01,
-    .source_uid = RDM_DEFAULT_UID,
-    .other = 0x0000000001000000,
-    .check = 0,
-};
-/****** 标准最小RDM协议 ******/
-//广播包
-static void RDM_Disc_Driver(dmx_line_t *dmx_line, uint64_t low_uid,uint64_t high_uid)
+/**
+ * @brief 获取指定索引的设备UID
+ * @param dr_line DMX+RDM链路指针
+ * @param index 设备索引 0->返回头节点
+ * @return 设备UID指针  NULL->无此设备
+ */
+uid_t* rdm_uid_get(dr_line_t *dr_line, uint16_t index)
 {
-    //广播地址
-    RDM_Package_Set_Uid(0x0000FFFFFFFFFFFF);
+    uid_t *p = __DR_RDM_UID_LIST(dr_line);
+
+    // 返回头节点
+    if(index == 0)
+        return p;
     
-    //寻找设备
-    RDM_Package_Set_Cmd(0x10,0x0001);
-
-    //设置数据
-    uint8_t data[12];
-    data[0] = (low_uid >> 40) & 0xFF;
-    data[1] = (low_uid >> 32) & 0xFF;
-    data[2] = (low_uid >> 24) & 0xFF;
-    data[3] = (low_uid >> 16) & 0xFF;
-    data[4] = (low_uid >> 8) & 0xFF;
-    data[5] = low_uid & 0xFF;
-
-    data[6]  = (high_uid >> 40) & 0xFF;
-    data[7]  = (high_uid >> 32) & 0xFF;
-    data[8]  = (high_uid >> 24) & 0xFF;
-    data[9]  = (high_uid >> 16) & 0xFF;
-    data[10] = (high_uid >> 8) & 0xFF;
-    data[11] = high_uid & 0xFF;
-    RDM_Package_Set_Data(0x0C,data);
-
-    RDM_Package_Send(dmx_line);
-}
-//哑音包
-uid_t *RDM_Disc_Mute(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x10,0x0002);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
+    //搜索指定节点
+    for(int i = 0; i < index; i++)
     {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == DISC_MUTE)
-            {
-                p->mute = 1;
-                //正确回应，退出
-                return p;
-            }
-        }
+        p = p->next;
+
+        // 搜索到最后一个节点
+        if(p == __DR_RDM_UID_LIST(dr_line))
+            return NULL;
     }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
 
-
-    return NULL;
-}
-//解除哑音包
-uid_t *RDM_Disc_Un_Mute(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x10,0x0003);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == DISC_UN_MUTE)
-            {
-                p->mute = 0;
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//解除所有哑音
-void RDM_Disc_Un_Mute_All(dmx_line_t *dmx_line)
-{
-    RDM_Package_Set_Uid(0x0000FFFFFFFFFFFF);
-
-    RDM_Package_Set_Cmd(0x10,0x0003);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    RDM_Package_Send(dmx_line);
-	
-	HAL_Delay(100);
-}
-//查设备软件版本
-uid_t * RDM_Get_Version(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x00C0);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_VERSION)
-            {
-                p->device_version = dmx_line->rdm_package_prase.data[0];
-                p->device_version <<= 8;
-                p->device_version |= dmx_line->rdm_package_prase.data[1];
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//查设备信息
-uid_t * RDM_Get_Info(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x0060);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_INFO)
-            {
-                //解析DMX地址
-                p->device_dmx = dmx_line->rdm_package_prase.data[14];
-                p->device_dmx <<= 8;
-                p->device_dmx |= dmx_line->rdm_package_prase.data[15];
-                //解析通道数
-                p->device_cur_channel = dmx_line->rdm_package_prase.data[10];
-                p->device_cur_channel <<= 8;
-                p->device_cur_channel = dmx_line->rdm_package_prase.data[11];
-                //解析模式
-                p->device_cur_mode = dmx_line->rdm_package_prase.data[12];
-                p->device_mode_max = dmx_line->rdm_package_prase.data[13];
-                //错误检测
-                if(p->device_cur_mode > p->device_mode_max || p->device_mode_max==0 || p->device_cur_mode==0)
-                {
-                    p->device_cur_mode = 1;
-                    p->device_mode_max = 1;
-                }
-                if(p->device_cur_channel > 512)
-                {
-                    p->device_cur_channel = 512;
-                }
-                if(p->device_dmx > 512 || p->device_dmx == 0)
-                {
-                    p->device_dmx = 1;
-                }
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//查设备状态
-uid_t * RDM_Get_Flag(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x1000);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_FLAG)
-            {
-                p->device_flag = dmx_line->rdm_package_prase.data[0];
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//设置设备状态
-uid_t * RDM_Set_Flag(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x30,0x1000);
-
-    RDM_Package_Set_Data(1,&p->device_flag);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == SET_DRIVER_FLAG)
-            {
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-    return NULL;
-}
-//查设备DMX地址
-uid_t * RDM_Get_DMX_Addr(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x00F0);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_DMX_ADDR)
-            {
-                p->device_dmx = dmx_line->rdm_package_prase.data[0];
-                p->device_dmx <<= 8;
-                p->device_dmx |= dmx_line->rdm_package_prase.data[1];
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//设置设备DMX地址
-uid_t * RDM_Set_DMX_Addr(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x30,0x00F0);
-
-    uint8_t data[2] = {0};
-    data[0] = (p->device_dmx >> 8) & 0xFF;
-    data[1] = p->device_dmx & 0xFF;
-    RDM_Package_Set_Data(2,data);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == SET_DRIVER_DMX_ADDR)
-            {
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-    return NULL;
-}
-//查设备支持的命令
-uid_t * RDM_Get_PID(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x0050);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == IRR_PACKAGE)
-            {
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//查设备自定义命令
-uid_t * RDM_Get_Cust_PID(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x0051);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == IRR_PACKAGE)
-            {
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-/****** 标准扩展RDM协议 ******/
-//查设备模式
-uid_t * RDM_Get_Mode(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x00E0);
-
-    RDM_Package_Set_Data(0,NULL);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_MODE)
-            {
-                p->device_cur_mode = dmx_line->rdm_package_prase.data[0];
-                p->device_mode_max = dmx_line->rdm_package_prase.data[1];
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-
-    return NULL;
-}
-//设置设备模式
-uid_t * RDM_Set_Mode(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x30,0x00E0);
-
-    RDM_Package_Set_Data(1,&p->device_cur_mode);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == SET_DRIVER_MODE)
-            {
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-
-    return NULL;
-}
-//查设备模式描述(当前模式通道数)
-uid_t * RDM_Get_Mode_Info(dmx_line_t *dmx_line,uid_t *p)
-{
-    if(p == NULL)
-        return NULL;
-    RDM_Package_Set_Uid(p->uid);
-
-    RDM_Package_Set_Cmd(0x20,0x00E1);
-
-    RDM_Package_Set_Data(1,&p->device_cur_mode);
-
-    //三次冗余，三次都回应错误删除设备
-    for(uint8_t i = 0; i < 3; i++)
-    {
-        RDM_Package_Send(dmx_line);
-        HAL_Delay(100);
-        {
-            if(dmx_line->rdm_package_prase.rdm_package == GET_DRIVER_MODE_INFO)
-            {
-                p->device_cur_channel = dmx_line->rdm_package_prase.data[0];
-                p->device_cur_channel <<= 8;
-                p->device_cur_channel |= dmx_line->rdm_package_prase.data[1];
-                //正确回应，退出
-                return p;
-            }
-        }
-    }
-    //设备未回应回调函数
-    RDM_Device_Offline_Callback(dmx_line, p);
-    //删除设备
-    RDM_Device_Delete(p);
-    return NULL;
+    //返回搜索到的节点
+    return p;
+    
 }
 
+/************************ 标准RDM协议实现 ************************/
 
-/******************二分搜寻设备算法******************/
-void RDM_Binary_Search(dmx_line_t *dmx_line, uint64_t low_uid, uint64_t high_uid)
+/**
+ * @brief 发送RDM广播包
+ * @param dr_line DMX+RDM链路指针
+ * @param low_uid 搜索范围最低UID
+ * @param high_uid 搜索范围最高UID
+ */
+void rdm_disc_driver(dr_line_t *dr_line, uint64_t low_uid, uint64_t high_uid)
 {
-    RDM_Disc_Driver(dmx_line, low_uid, high_uid); 
-    //等待解包成功
-    HAL_Delay(100);
-    {
-        //确定唯一设备
-        if(dmx_line->rdm_package_prase.rdm_package == DISC_UNIQUE)
-        {
-            uint64_t uid = 0;
-            //解析UID
-            for(int j = 0; j < 5; j++)
-            {
-                uid |= dmx_line->rdm_package_prase.data[j];
-                uid <<= 8;
-            }
-            uid |= dmx_line->rdm_package_prase.data[5];
-            
-            //如果未添加过该设备
-            if(RDM_Uid_Add(uid))
-            {
-                //获取操作指针
-                uid_t *p = RDM_Uid_Search(uid);
-                //哑音
-                p = RDM_Disc_Mute(dmx_line, p);
-                //获取设备信息
-                p = RDM_Get_Info(dmx_line, p);
-                p = RDM_Get_Flag(dmx_line1, p);
-                //成功添加设备、通知更新显示
-                if(p != NULL)
-                    RDM_Device_Online_Callback(dmx_line, p);
-            }
-            //已添加过该设备
-            else
-            {
-                //获取操作指针
-                uid_t *p = RDM_Uid_Search(uid);
-                //哑音
-                p = RDM_Disc_Mute(dmx_line, p);
-            }
-            //再次搜索一次该分支
-            RDM_Binary_Search(dmx_line, low_uid, high_uid);
-            return;
-        }
-        //可能有两个UID相同的设备
-        else if(low_uid == high_uid)
-        {
-            //如果未添加过该设备
-            if(RDM_Uid_Add(low_uid))
-            {
-                //获取操作指针
-                uid_t *p = RDM_Uid_Search(low_uid);
-                //哑音
-                p = RDM_Disc_Mute(dmx_line, p);
-                //获取设备信息
-                p = RDM_Get_Info(dmx_line, p);
-                p = RDM_Get_Flag(dmx_line1, p);
-                //成功添加设备、通知更新显示
-                if(p != NULL)
-                    RDM_Device_Online_Callback(dmx_line, p);
-            }
-            //已添加过该设备
-            else
-            {
-                //获取操作指针
-                uid_t *p = RDM_Uid_Search(low_uid);
-                //哑音
-                p = RDM_Disc_Mute(dmx_line, p);
-            }
-            return;
-        }
-        //冲突
-        else
-        {
-            uint64_t mid_uid = (high_uid + low_uid)/2;
-            RDM_Binary_Search(dmx_line, low_uid,mid_uid);
-            RDM_Binary_Search(dmx_line, mid_uid+1,high_uid);
-            return;
-        }
-    }
-//    // 超时未获取到信号量
-//    return;
+    // 设置广播地址
+    rdm_package_set_uid(dr_line, RDM_BROADCAST_ADDR);
+    
+    // 设置发现设备命令
+    rdm_package_set_cmd(dr_line, 0x10, 0x0001);
+
+    // 准备UID范围数据
+    uint8_t data[12] = {
+        (uint8_t)((low_uid >> 40) & 0xFF),
+        (uint8_t)((low_uid >> 32) & 0xFF),
+        (uint8_t)((low_uid >> 24) & 0xFF),
+        (uint8_t)((low_uid >> 16) & 0xFF),
+        (uint8_t)((low_uid >> 8) & 0xFF),
+        (uint8_t)(low_uid & 0xFF),
+        (uint8_t)((high_uid >> 40) & 0xFF),
+        (uint8_t)((high_uid >> 32) & 0xFF),
+        (uint8_t)((high_uid >> 24) & 0xFF),
+        (uint8_t)((high_uid >> 16) & 0xFF),
+        (uint8_t)((high_uid >> 8) & 0xFF),
+        (uint8_t)(high_uid & 0xFF)
+    };
+    
+    rdm_package_set_data(dr_line, 0x0C, data);
+    rdm_package_send(dr_line);
 }
 
-
-/******************发送端解包函数******************/
-void RDM_Unpack(dmx_line_t *dmx_line)
+/**
+ * @brief 发送设备哑音命令
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_disc_mute(dr_line_t *dr_line, uid_t *p)
 {
-    //定位包头
-    uint8_t disc_unique = 0;
-    //用于确定包长
-    int i = 0;
-    for(i = 0; i < 255; i++)
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x10, 0x0002);  // DISC_MUTE命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 发送设备解除哑音命令
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_disc_un_mute(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x10, 0x0003);  // DISC_UN_MUTE命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 查询设备软件版本
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_version(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x00C0);  // GET_DEVICE_VERSION命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 查询设备信息
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_info(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x0060);  // GET_DEVICE_INFO命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 查询设备状态
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_flag(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x1000);  // GET_DEVICE_FLAG命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 设置设备状态
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_set_flag(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x30, 0x1000);  // SET_DEVICE_FLAG命令
+    rdm_package_set_data(dr_line, 1, &p->device_flag);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 查询设备DMX地址
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_dmx_addr(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x00F0);  // GET_DMX_ADDRESS命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 设置设备DMX地址
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_set_dmx_addr(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x30, 0x00F0);  // SET_DMX_ADDRESS命令
+    
+    uint8_t data[2] = {
+        (uint8_t)((p->device_dmx >> 8) & 0xFF),
+        (uint8_t)(p->device_dmx & 0xFF)
+    };
+    
+    rdm_package_set_data(dr_line, 2, data);
+    rdm_package_send(dr_line);
+}
+
+/************************ 扩展RDM协议命令 ************************/
+
+/**
+ * @brief 查询设备工作模式
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_mode(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x00E0);  // GET_DEVICE_MODE命令
+    rdm_package_set_data(dr_line, 0, NULL);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 设置设备工作模式
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_set_mode(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x30, 0x00E0);  // SET_DEVICE_MODE命令
+    rdm_package_set_data(dr_line, 1, &p->device_cur_mode);
+    rdm_package_send(dr_line);
+}
+
+/**
+ * @brief 查询设备模式描述信息
+ * @param dr_line DMX+RDM链路指针
+ * @param p 目标设备UID指针
+ */
+void rdm_get_mode_info(dr_line_t *dr_line, uid_t *p)
+{
+    if(p == NULL) return;
+
+    rdm_package_set_uid(dr_line, p->uid);
+    rdm_package_set_cmd(dr_line, 0x20, 0x00E1);  // GET_DEVICE_MODE_INFO命令
+    rdm_package_set_data(dr_line, 1, &p->device_cur_mode);
+    rdm_package_send(dr_line);
+}
+
+/************************ RDM发送端解包处理 ************************/
+
+/**
+ * @brief RDM输出端数据包解包处理
+ * @param dr_line DMX+RDM链路指针
+ * @note 解析接收到的RDM数据包并设置相应的包类型
+ */
+void rdm_output_unpack(dr_line_t *dr_line)
+{
+    //处理广播搜寻设备回应包
+    if(__DR_RECV_PACKAGE(dr_line) == DISC_RESPONE_PACKAGE)
     {
-        if(dmx_line->dmx_rdm_package[i] == 0xCC && dmx_line->dmx_rdm_package[i+1] == 0x01)
-            break;
-        if(dmx_line->dmx_rdm_package[i] == 0xFE)
+        uint16_t i = 0;
+        // 跳过前导0xFE
+        while(__DR_RX_BUF(dr_line)[++i] == 0xFE);
+        
+        // 验证广播包格式
+        if(__DR_RX_BUF(dr_line)[i++] == 0xAA)
         {
-            disc_unique++;
-            if(disc_unique == 5)
-                break;
-        }
-    }
-    if(i == 255)
-    {
-        dmx_line->rdm_package_prase.rdm_package = IRR_PACKAGE;
-        return;
-    }
-    //广播包
-    if(disc_unique == 5)
-    {
-        //跳过0xFE
-        while(dmx_line->dmx_rdm_package[++i] == 0xFE);
-        //再次确认
-        if(dmx_line->dmx_rdm_package[i++] == 0xAA)
-        {
+            // 解码UID数据 (6字节)
             for(int j = 0; j < 6; j++)
             {
-                // | 0XAA
-                dmx_line->rdm_package_prase.data[j] = dmx_line->dmx_rdm_package[i]&0x55; 
-                // | 0x55
-                dmx_line->rdm_package_prase.data[j] |= dmx_line->dmx_rdm_package[i+1]&0xAA; 
-                i+=2;
+                // 合并交替的0xAA和0x55掩码数据
+                __DR_RDM_PARSE(dr_line).data[j] = (__DR_RX_BUF(dr_line)[i] & 0x55) | 
+                                                         (__DR_RX_BUF(dr_line)[i+1] & 0xAA);
+                i += 2;
             }
-
+            
+            // 计算校验和
             uint32_t sum = 0;
             for(int j = 0; j < 6; j++)
             {
-                sum += dmx_line->rdm_package_prase.data[j]|0xAA;
-                sum += dmx_line->rdm_package_prase.data[j]|0x55;
+                sum += (__DR_RDM_PARSE(dr_line).data[j] | 0xAA);
+                sum += (__DR_RDM_PARSE(dr_line).data[j] | 0x55);
             }
-            uint8_t checksum[4] = {0};
-            checksum[0] = (sum >> 8)|0xAA;
-            checksum[1] = (sum >> 8)|0x55;
-            checksum[2] = sum|0xAA;
-            checksum[3] = sum|0x55;
-            if(dmx_line->dmx_rdm_package[i] == checksum[0] && dmx_line->dmx_rdm_package[i+1] == checksum[1] && dmx_line->dmx_rdm_package[i+2] == checksum[2] && dmx_line->dmx_rdm_package[i+3] == checksum[3])
+            
+            // 生成预期校验值
+            uint8_t checksum[4] = {
+                (uint8_t)((sum >> 8) | 0xAA),
+                (uint8_t)((sum >> 8) | 0x55),
+                (uint8_t)(sum | 0xAA),
+                (uint8_t)(sum | 0x55)
+            };
+            
+            // 验证校验和
+            if(memcmp(&__DR_RX_BUF(dr_line)[i], checksum, 4) == 0)
             {
-                dmx_line->rdm_package_prase.rdm_package = DISC_UNIQUE;
+                __DR_RDM_PARSE(dr_line).rdm_package = DISC_UNIQUE;
             }
             else
-                dmx_line->rdm_package_prase.rdm_package = ERROR_PACKAGE;
-            i+=4;
+            {
+                __DR_RDM_PARSE(dr_line).rdm_package = RDM_PACKAGE_CHECK_ERROR;
+            }
+            i += 4;
         }
     }
-    //其他包
-    else
+    // 处理标准RDM包
+    else if(__DR_RECV_PACKAGE(dr_line) == RDM_PACKAGE)
     {
-        switch(dmx_line->dmx_rdm_package[i+20])
+        // 根据命令类型解析包
+        switch(__DR_RX_BUF(dr_line)[20])
         {
+            // 响应类命令
             case 0x11:
-                if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0x02)
+                if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0x02)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = DISC_MUTE;
+                    __DR_RDM_PARSE(dr_line).rdm_package = DISC_MUTE;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0x03)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0x03)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = DISC_UN_MUTE;
+                    __DR_RDM_PARSE(dr_line).rdm_package = DISC_UN_MUTE;
                 }
-            break;
+                break;
+                
+            // 获取类命令
             case 0x21:
-                if(dmx_line->dmx_rdm_package[i+21] == 0x10 && dmx_line->dmx_rdm_package[i+22] == 0x00)
+                if(__DR_RX_BUF(dr_line)[21] == 0x10 && __DR_RX_BUF(dr_line)[22] == 0x00)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_FLAG;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_FLAG;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xF0)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xF0)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_DMX_ADDR;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_DMX_ADDR;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xC0)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xC0)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_VERSION;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_VERSION;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0x60)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0x60)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_INFO;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_INFO;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xE0)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xE0)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_MODE;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_MODE;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xE1)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xE1)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = GET_DRIVER_MODE_INFO;
+                    __DR_RDM_PARSE(dr_line).rdm_package = GET_DRIVER_MODE_INFO;
                 }
-            break;
+                break;
+                
+            // 设置类命令
             case 0x31:
-                if(dmx_line->dmx_rdm_package[i+21] == 0x10 && dmx_line->dmx_rdm_package[i+22] == 0x00)
+                if(__DR_RX_BUF(dr_line)[21] == 0x10 && __DR_RX_BUF(dr_line)[22] == 0x00)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = SET_DRIVER_FLAG;
+                    __DR_RDM_PARSE(dr_line).rdm_package = SET_DRIVER_FLAG;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xF0)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xF0)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = SET_DRIVER_DMX_ADDR;
+                    __DR_RDM_PARSE(dr_line).rdm_package = SET_DRIVER_DMX_ADDR;
                 }
-                else if(dmx_line->dmx_rdm_package[i+21] == 0x00 && dmx_line->dmx_rdm_package[i+22] == 0xE0)
+                else if(__DR_RX_BUF(dr_line)[21] == 0x00 && __DR_RX_BUF(dr_line)[22] == 0xE0)
                 {
-                    dmx_line->rdm_package_prase.rdm_package = SET_DRIVER_MODE;
+                    __DR_RDM_PARSE(dr_line).rdm_package = SET_DRIVER_MODE;
                 }
-            break;
+                break;
+                
             default:
-                dmx_line->rdm_package_prase.rdm_package = IRR_PACKAGE;
-            break;
+                __DR_RDM_PARSE(dr_line).rdm_package = RDM_PACKAGE_CHECK_ERROR;
+                break;
         }
-        //记录数据
-        for(int j = 0; j < dmx_line->dmx_rdm_package[i+23]; j++)
-        {
-            dmx_line->rdm_package_prase.data[j] = dmx_line->dmx_rdm_package[i+24+j];
-        }
-        //记录源UID
-        dmx_line->rdm_package_prase.source_uid = dmx_line->dmx_rdm_package[i+9];
-        dmx_line->rdm_package_prase.source_uid <<= 8;
-        dmx_line->rdm_package_prase.source_uid |= dmx_line->dmx_rdm_package[i+10];
-        dmx_line->rdm_package_prase.source_uid <<= 8;
-        dmx_line->rdm_package_prase.source_uid |= dmx_line->dmx_rdm_package[i+11];
-        dmx_line->rdm_package_prase.source_uid <<= 8;
-        dmx_line->rdm_package_prase.source_uid |= dmx_line->dmx_rdm_package[i+12];
-        dmx_line->rdm_package_prase.source_uid <<= 8;
-        dmx_line->rdm_package_prase.source_uid |= dmx_line->dmx_rdm_package[i+13];
-        dmx_line->rdm_package_prase.source_uid <<= 8;
-        dmx_line->rdm_package_prase.source_uid |= dmx_line->dmx_rdm_package[i+14];
-
-
-        //计算校验位
+        
+        // 记录数据部分
+        uint8_t data_len = __DR_RX_BUF(dr_line)[23];
+        memcpy(__DR_RDM_PARSE(dr_line).data, &__DR_RX_BUF(dr_line)[24], data_len);
+        
+        // 解析源UID (6字节)
+        __DR_RDM_PARSE(dr_line).source_uid = 
+            ((uint64_t)__DR_RX_BUF(dr_line)[9] << 40) |
+            ((uint64_t)__DR_RX_BUF(dr_line)[10] << 32) |
+            ((uint64_t)__DR_RX_BUF(dr_line)[11] << 24) |
+            ((uint64_t)__DR_RX_BUF(dr_line)[12] << 16) |
+            ((uint64_t)__DR_RX_BUF(dr_line)[13] << 8) |
+            (uint64_t)__DR_RX_BUF(dr_line)[14];
+        
+        // 计算并验证校验和
         uint32_t sum = 0;
-        for(int j = i; j < i+24+dmx_line->dmx_rdm_package[i+23]; j++)
+        for(int i = 0; i < 24+data_len; i++)
         {
-            sum += dmx_line->dmx_rdm_package[j];
+            sum += __DR_RX_BUF(dr_line)[i];
         }
-        i += 24+dmx_line->dmx_rdm_package[i+23];
-        //检测校验位 !!! & 优先级小于 ==
-        if((((sum >> 8) & 0xFF) == dmx_line->dmx_rdm_package[i]) && ((sum & 0xFF) == dmx_line->dmx_rdm_package[i+1]));
-        else
-            dmx_line->rdm_package_prase.rdm_package = ERROR_PACKAGE;
+        
+        if(((sum >> 8) & 0xFF) != __DR_RX_BUF(dr_line)[24+data_len] || 
+           (sum & 0xFF) != __DR_RX_BUF(dr_line)[25+data_len])
+        {
+            __DR_RDM_PARSE(dr_line).rdm_package = RDM_PACKAGE_CHECK_ERROR;
+        }
     }
 }
-#endif
 
-
+/**
+ * @brief 根据解包结果自动设置设备信息
+ * @param dr_line DMX+RDM链路指针
+ */
+void rdm_auto_set(dr_line_t *dr_line)
+{
+    switch(__DR_RDM_PARSE(dr_line).rdm_package)
+    {
+        case GET_DRIVER_FLAG:
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_flag = 
+                __DR_RDM_PARSE(dr_line).data[0];
+            break;
+            
+        case GET_DRIVER_DMX_ADDR:
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_dmx = 
+                (__DR_RDM_PARSE(dr_line).data[0] << 8) | 
+                __DR_RDM_PARSE(dr_line).data[1];
+            break;
+            
+        case GET_DRIVER_VERSION:
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_version = 
+                (__DR_RDM_PARSE(dr_line).data[0] << 8) | 
+                __DR_RDM_PARSE(dr_line).data[1];
+            break;
+            
+        case GET_DRIVER_INFO:
+            // 解析DMX地址
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_dmx = 
+                (__DR_RDM_PARSE(dr_line).data[14] << 8) | 
+                __DR_RDM_PARSE(dr_line).data[15];
+                
+            // 解析通道数
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_cur_channel = 
+                (__DR_RDM_PARSE(dr_line).data[10] << 8) | 
+                __DR_RDM_PARSE(dr_line).data[11];
+                
+            // 解析模式信息
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_cur_mode = 
+                __DR_RDM_PARSE(dr_line).data[12];
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_mode_max = 
+                __DR_RDM_PARSE(dr_line).data[13];
+            break;
+            
+        case GET_DRIVER_MODE:
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_cur_mode = 
+                __DR_RDM_PARSE(dr_line).data[0];
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_mode_max = 
+                __DR_RDM_PARSE(dr_line).data[1];
+            break;
+            
+        case GET_DRIVER_MODE_INFO:
+            __DR_RDM_QUEUE(dr_line)[__DR_RDM_QUEUE_HEAD(dr_line)].target_uid->device_cur_channel = 
+                (__DR_RDM_PARSE(dr_line).data[0] << 8) | 
+                __DR_RDM_PARSE(dr_line).data[1];
+            break;
+    }
+}

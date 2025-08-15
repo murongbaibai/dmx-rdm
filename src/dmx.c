@@ -1,50 +1,60 @@
-#include "dmx_rdm.h"
+#include "../inc/dr_internal.h"
 
-__weak void DMX_Send_Before_Callback(dmx_line_t *dmx_line)
+static const uint8_t dmx_black_buf[513] = {0};  ///< 黑场数据缓冲区（全0数据包）
+
+/**
+ * @brief DMX发送前回调函数(弱定义)
+ * @param dr_line DMX+RDM链路指针
+ * @note 用户可重写此函数实现发送前自定义处理
+ * @weak 默认实现为空函数
+ */
+__weak void dmx_before_send_callback(dr_line_t *dr_line)
 {
+    // 默认空实现
 }
 
-static uint8_t dmx_black_buf[513] = {0};
-//DMX发送 发送包越短，发送的越快，代表对设备的刷新率越高
-void DMX_Send(dmx_line_t *dmx_line)
+/**
+ * @brief 发送DMX数据包
+ * @param dr_line DMX+RDM链路指针
+ * @note 发送流程:
+ *       1. 触发发送前回调
+ *       2. 发送BREAK起始信号
+ *       3. 发送数据包(根据状态选择有效数据或黑场)
+ */
+void dmx_send(dr_line_t *dr_line)
 {
-    DMX_Send_Before_Callback(dmx_line);
-    //起始信号
-    dmx_line->change_mode_fun(DMX_SEND_RESET);
-    dmx_line->send_reset_fun();
+    // 前置处理回调
+    dmx_before_send_callback(dr_line);
 
-    //发送包
-    dmx_line->change_mode_fun(DMX_SEND_DATA);
-#if DMX_ZHAN
-    uint8_t start_code = 0x00;
-    HAL_UART_Transmit(dmx_line,&start_code,1,HAL_MAX_DELAY);
-    for(int i = 0; i < 512; i++)
-    {
-        HAL_UART_Transmit(dmx_line,&dmx_send_buf[i],1,HAL_MAX_DELAY);
-        //延时产生占
-        dmx_line->delay_nus_fun(DMX_ZHAN);
+    //设置为发送模式
+    __DR_SEND_STATUS(dr_line) = 1;
+    
+    // 发送BREAK起始信号
+    dr_funs.change_mode(dr_line, DR_SEND_RESET);
+    dr_funs.send_reset(dr_line);
+
+    // 切换至数据发送模式
+    dr_funs.change_mode(dr_line, DR_SEND_DATA);
+
+    // 根据链路状态选择数据内容
+    if(__DR_DMX_OUTPUT_BLACK(dr_line) == 0) {
+        dr_funs.transmit(dr_line, __DR_TX_BUF(dr_line), 513);  // 发送有效数据
     }
-#else
-#ifdef USER_PRO_DATA_LEN
-    DMX_Line_Transmit_DMA(dmx_line,dmx_line->dmx_send_buf,USER_PRO_DATA_LEN);
-#else
-    if(dmx_line->dmx_status == DMX_LINE_DMX_OUTPUT)
-        DMX_Line_Transmit_DMA(dmx_line,dmx_line->dmx_send_buf,513);
-    else if(dmx_line->dmx_status == DMX_LINE_BLACK_OUTPUT)
-        DMX_Line_Transmit_DMA(dmx_line,dmx_black_buf,513);
-#endif
-#endif
+    else if(__DR_DMX_OUTPUT_BLACK(dr_line) == 1) {
+        dr_funs.transmit(dr_line, (uint8_t *)dmx_black_buf, 513);  // 发送黑场数据
+    }
 }
 
-
-
-//DMX解包
-void DMX_Unpack(dmx_line_t *dmx_line)
+/**
+ * @brief DMX数据解包
+ * @param dr_line DMX+RDM链路指针
+ * @note 解包规则:
+ *       - 跳过前1字节头
+ *       - 根据设备通道数确定有效数据长度
+ */
+void dmx_unpack(dr_line_t *dr_line)
 {
-    /*********!!! 不同于标准的DMX协议，是作为半主机的变种 !!!*********/
-// #if (DEVICE_TYPE_SWITCH == DEVICE_TYPE_INPUT)
-//     memcpy(dmx_line->dmx_package_prase, &dmx_line->dmx_rdm_package[device_info.info.dmx_start_addr], device_info.info.dmx_channel);
-// #endif
-    memcpy(dmx_line->dmx_package_prase, &dmx_line->dmx_rdm_package[2], MOTOR_NUM);
+    memcpy(__DR_DMX_PARSE(dr_line), 
+           &__DR_RX_BUF(dr_line)[__DR_DMX_ADDR(dr_line)],    // 按DMX地址确定读取的首地址
+           __DR_DMX_CHANNEL(dr_line));                       // 按设备通道数确定长度
 }
-

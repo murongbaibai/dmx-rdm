@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "dmx_rdm.h": "c",
+        "uart_init_template.h": "c",
+        "dmx_types.h": "c",
+        "rdm_output.h": "c",
+        "dmx.h": "c",
+        "dmx_rdm_internal.h": "c",
+        "dmx_rdm_config.h": "c"
+    },
+    "C_Cpp.errorSquiggles": "disabled",
+    "C_Cpp.default.defines": ["__weak=__attribute__((weak))",]
+}
