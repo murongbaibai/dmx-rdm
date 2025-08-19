@@ -1,6 +1,12 @@
 #include "../inc/dr_internal.h"
 
-static const uint8_t dmx_black_buf[513] = {0};  ///< 黑场数据缓冲区（全0数据包）
+/**
+ * @note 发现一个bug，当使用static const修饰时，数组会存放在FLASH中，正常读取发送是没有问题的，
+ *       但是其他应用程序编辑FLASH的时候，不允许再对FLASH进行读取，一般关闭中断即可阻止，HAL库也是这么做的。
+ *       但是发送黑场数据是DMA自动发送的，当FLASH进行编辑的时候，DMA不会停止，导致读取冲突，程序卡死，所以这里还是没有用
+ *       const进行修饰。
+ */
+static uint8_t dmx_black_buf[513] = {0};  ///< 黑场数据缓冲区（全0数据包）
 
 /**
  * @brief DMX发送前回调函数(弱定义)
