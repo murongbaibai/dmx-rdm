@@ -197,11 +197,7 @@ static void unpack_task_handle(dr_line_t *dr_line)
                 __DR_LINE_MODE(dr_line) == DMX_OUTPUT ||
                 __DR_LINE_MODE(dr_line) == DMX_RDM_INPUT)
             {
-#if USE_DMX_QUICK_UNPACK
-                //在中断中完成解包...
-#else
                 dmx_unpack(dr_line);
-#endif
                 //调用解包完成接口
                 dmx_unpack_complete_callback(dr_line);
             }
