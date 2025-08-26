@@ -168,15 +168,11 @@ static void time_task_handle(dr_line_t *dr_line)
  * @param dr_line DMX+RDM链路指针
  * @weak 默认实现为空函数
  */
-__weak void dmx_unpack_complete_callback(dr_line_t *dr_line){}
+__weak void dmx_unpack_complete_callback(dr_line_t *dr_line)
+{
+    
+}
 
-/**
- * @brief RDM设备设置回调(弱定义)
- * @param dr_line DMX+RDM链路指针
- * @param p 设备UID指针
- * @weak 默认实现为空函数
- */
-__weak void rdm_device_set_callback(dr_line_t *dr_line){}
 
 /**
  * @brief 解包处理任务

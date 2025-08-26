@@ -40,6 +40,7 @@ __weak void rdm_device_add_callback(dr_line_t *dr_line, uid_t *p);
 __weak void rdm_device_online_callback(dr_line_t *dr_line, uid_t *p);
 __weak void rdm_device_respone_callback(dr_line_t *dr_line, uid_t *p, uint16_t package);
 __weak void rdm_device_set_callback(dr_line_t *dr_line);
+__weak void dmx_refreash_tim_handle(dr_line_t *dr_line);
 
 
 

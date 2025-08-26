@@ -433,6 +433,17 @@ void rdm_input_unpack(dr_line_t *dr_line)
 }
 
 /**
+ * @brief RDM设备设置回调(弱定义)
+ * @param dr_line DMX+RDM链路指针
+ * @param p 设备UID指针
+ * @weak 默认实现为空函数
+ */
+__weak void rdm_device_set_callback(dr_line_t *dr_line)
+{
+    
+}
+
+/**
  * @brief RDM自动响应处理
  * @param dr_line DMX+RDM链路指针
  * @note 根据解包结果自动生成相应的响应包

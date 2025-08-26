@@ -187,13 +187,9 @@ void dr_line_mode_set(dr_line_t *dr_line, uint8_t line_mode)
             dr_funs.receive(dr_line, __DR_RX_BUF(dr_line), 1);
             break;
             
-        case DMX_OUTPUT:
-            // 允许DMX发送
-            DR_SEMAPHORE_GIVE(__DR_SEND_SEMAPHORE(dr_line));
-            break;
-            
         case RDM_OUTPUT:
-            // 允许RDM发送
+        case DMX_OUTPUT:
+            // 允许发送
             DR_SEMAPHORE_GIVE(__DR_SEND_SEMAPHORE(dr_line));
             break;
             
@@ -377,8 +373,8 @@ void dr_uart_rxcomplete_handle(dr_line_t *dr_line)
     }
     else if(__DR_RECV_PACKAGE(dr_line) == DMX_PACKAGE)
     {
-        // DMX指定通道组接收
-        if(__DR_RX_CNT(dr_line) >= __DR_DMX_ADDR(dr_line)+__DR_DMX_CHANNEL(dr_line))
+        // 按标准DMX512协议接收
+        if(__DR_RX_CNT(dr_line) >= 512)
             package_recv_ok_handle(dr_line);
     }
 
@@ -451,7 +447,7 @@ void dr_uart_txcomplete_handle(dr_line_t *dr_line)
 #endif
         break;
 
-        case RDM_OUTPUT:            
+        case RDM_OUTPUT:
         case DMX_RDM_INPUT:
         case RDM_INPUT:
             package_restart_handle(dr_line);

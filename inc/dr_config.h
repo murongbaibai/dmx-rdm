@@ -27,19 +27,18 @@
 #define RDM_DEVICE_ID         *(uint32_t *)0x0801FFF0  //设备ID
 
 /* 定时器参数（单位：ms） */
-#define IDLE_TIM_OVER         10    ///< 链路空闲检测超时阈值（ms）
+#define IDLE_TIM_OVER         15    ///< 链路空闲检测超时阈值（ms）
 #define SEND_DELAY_TIM_OVER   0     ///< 数据包间延迟（ms）
 #define REFRESH_TIM_OVER      500   ///< 链路信号断开检测时间（ms）
-#define RDM_RECV_TIM_OVER     40    ///< RDM接收超时时间（ms）
+#define RDM_RECV_TIM_OVER     50    ///< RDM接收超时时间（ms）
 #define SEND_TIMEOUT_TIM_OVER 300   ///< 发送超时时间（ms） 
 
 
 /* DMX通道模式配置 
  * @note 通道数必须满足 ANSI E1.11-2008 标准
  */
-#define USE_DMX_QUICK_UNPACK  1     ///< 快速解包模式（中断中完成DMX解包,开启多路时对主频有一定要求）
-#define DMX_MODE1_CHANNEL     6     ///< 模式1通道数（6CH）
-#define DMX_MODE2_CHANNEL     8     ///< 模式2通道数（8CH）
+#define DMX_MODE1_CHANNEL     3     ///< 模式1通道数（3CH）
+#define DMX_MODE2_CHANNEL     6     ///< 模式2通道数（6CH）
 #define DMX_MODE3_CHANNEL     0     ///< 模式3通道数
 #define DMX_MODE4_CHANNEL     0     ///< 模式4通道数
 #define DMX_MODE5_CHANNEL     0     ///< 模式5通道数

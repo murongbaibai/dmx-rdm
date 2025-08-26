@@ -61,6 +61,7 @@ typedef struct uid_port_t {
  */
 typedef struct uid_t {
     uint8_t online_flag;        // 设备在线状态(1-在线，0离线)
+    uint8_t sync_flag;          // 设备同步状态(1-同步，0-不同步)
     uint8_t mute;               // 设备哑音状态
     uint8_t device_type;        // 设备类型
     uint8_t device_flag;        // 设备状态标志
@@ -338,7 +339,7 @@ typedef struct dmx_rdm_line_funs_t {
 #define __DR_DMX_MODE(dr_line)             (dr_line->dmx_line.mode)
 
 /* RDM链路访问宏 */
-#define __DR_RDM_PARSE(dr_line)          (dr_line->rdm_line.package_parse)
+#define __DR_RDM_PARSE(dr_line)            (dr_line->rdm_line.package_parse)
 #define __DR_RDM_LAST_PACKAGE(dr_line)     (dr_line->rdm_line.last_package)
 #define __DR_RDM_STACK(dr_line)            (dr_line->rdm_line.stack)
 #define __DR_RDM_STACK_DEPTH(dr_line)      (dr_line->rdm_line.stack_depth)
